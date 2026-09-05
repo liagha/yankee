@@ -1,6 +1,8 @@
 # yankee
 
-A small command-line tool that resolves media URLs down to stream assets and downloads them to disk. Single static binary, no external runtime.
+Yank shit from stuff.
+
+Give it a link to anything on YouTube, Spotify, or Instagram and it drags the goods home by the scruff. One binary, zero babysitting.
 
 ## Usage
 
@@ -9,12 +11,12 @@ yankee info <url> [--audio] [--proxy <p>]
 yankee get  <url> [--audio] [--proxy <p>] [--dir <d>]
 ```
 
-- `info` prints the resolved title, source, artist, and available stream URLs.
-- `get` downloads the best matching stream into the output directory.
-- `--audio` selects an audio-only stream; otherwise the best video stream is used.
-- `--proxy` routes all traffic through the given proxy (e.g. `http://127.0.0.1:2080`).
+- `info` — peek at the loot before you commit: title, source, artist, stream URLs.
+- `get` — commit. Best stream it can find, dragged into your folder.
+- `--audio` — skip the looking parts, just the sound.
+- `--proxy` — route everything through a proxy (e.g. `http://127.0.0.1:2080`) when you'd rather not wave from your own lawn.
 
-Output defaults to `downloads/`; override per-run with `--dir` or globally in `config.toml`:
+Spoils land in `downloads/` by default. Change it per-run with `--dir`, or once for good in `config.toml`:
 
 ```toml
 dir = "downloads"
@@ -22,9 +24,9 @@ dir = "downloads"
 
 ## Sources
 
-- **YouTube** — resolves video and audio streams for any watch URL.
-- **Spotify** — resolves track metadata and finds a matching audio stream.
-- **Instagram** — resolves post media.
+- **YouTube** — any watch URL, video or audio.
+- **Spotify** — track in, actual audio out.
+- **Instagram** — post media, grabbed courteously enough.
 
 ## Build
 
@@ -33,3 +35,7 @@ cargo build --release
 ```
 
 Needs a system OpenSSL (`native-tls`).
+
+## Why "yankee"?
+
+Because it yanks. And it's vaguely American about it.
