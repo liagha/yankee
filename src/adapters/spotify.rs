@@ -119,7 +119,7 @@ impl Client {
     }
 }
 
-fn rank(cands: Vec<Candidate>, want: Option<u64>) -> Vec<Candidate> {
+pub(crate) fn rank(cands: Vec<Candidate>, want: Option<u64>) -> Vec<Candidate> {
     let Some(want) = want else {
         return cands;
     };

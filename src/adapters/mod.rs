@@ -1,5 +1,6 @@
 //! adapter dispatch
 
+pub mod deezer;
 pub mod instagram;
 pub mod spotify;
 pub mod youtube;
@@ -24,6 +25,11 @@ pub enum Request {
         kind: String,
         format: Format,
     },
+    Deezer {
+        url: Url,
+        kind: String,
+        format: Format,
+    },
 }
 
 pub fn parse(input: &str) -> Result<Request> {
@@ -38,6 +44,14 @@ pub fn parse(input: &str) -> Result<Request> {
         Some(h) if h.contains("open.spotify.com") => {
             let kind = spotify::kind(&url)?;
             Ok(Request::Spotify {
+                url,
+                kind,
+                format: Format::Best,
+            })
+        }
+        Some(h) if h.contains("deezer.com") => {
+            let kind = deezer::kind(&url)?;
+            Ok(Request::Deezer {
                 url,
                 kind,
                 format: Format::Best,
@@ -67,22 +81,33 @@ fn youtube_id(input: &str) -> Result<String> {
     id.context("no id")
 }
 
-pub async fn resolve(req: &Request, config: &Config) -> Result<Media> {
+pub async fn resolve(req: &Request, config: &Config) -> Result<Vec<Media>> {
     match req {
         Request::Youtube { url, audio, format } => {
             let client = youtube::Api::new(config.proxy.as_deref())?;
             let id = youtube_id(url)?;
-            Ok(client.resolve(&id, *audio, *format).await?)
+            Ok(vec![client.resolve(&id, *audio, *format).await?])
         }
         Request::Instagram { url } => {
             let client = instagram::Client::new(config.proxy.as_deref())?;
-            client.resolve(url).await
+            Ok(vec![client.resolve(url).await?])
         }
         Request::Spotify { url, kind, format } => {
             let client = spotify::Client::new(config.proxy.as_deref())?;
-            match kind.as_str() {
+            let media = match kind.as_str() {
                 "track" => client.track(url.clone(), *format).await,
                 "album" => client.album(url.clone(), *format).await,
+                other => anyhow::bail!("unsupported kind: {other}"),
+            }?;
+            Ok(vec![media])
+        }
+        Request::Deezer { url, kind, format } => {
+            let mut client =
+                deezer::Client::new(config.proxy.as_deref(), config.arl.clone())?;
+            match kind.as_str() {
+                "track" => Ok(vec![client.track(url.clone(), *format).await?]),
+                "album" => client.album(url.clone(), *format).await,
+                "playlist" => client.playlist(url.clone(), *format).await,
                 other => anyhow::bail!("unsupported kind: {other}"),
             }
         }

@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub struct Config {
     pub dir: Option<String>,
     pub proxy: Option<String>,
+    pub arl: Option<String>,
 }
 
 impl Config {

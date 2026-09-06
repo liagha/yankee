@@ -21,7 +21,10 @@ pub async fn save(
     let http = client(proxy)?;
     let mut out = Vec::new();
     for (asset, name) in media.assets.iter().zip(shared_names(media, dir)) {
-        let (final_name, tmp) = if format.transcode() && asset.kind == Kind::Audio {
+        let (final_name, tmp) = if format.transcode()
+            && asset.kind == Kind::Audio
+            && asset.ext != format.label()
+        {
             let ext = format.label();
             (name.with_extension(ext), name.with_extension("part"))
         } else {
@@ -119,6 +122,7 @@ pub fn source_tag(source: Source) -> &'static str {
         Source::Youtube => "youtube",
         Source::Instagram => "instagram",
         Source::Spotify => "spotify",
+        Source::Deezer => "deezer",
     }
 }
 

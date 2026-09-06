@@ -8,6 +8,7 @@ pub enum Source {
     Youtube,
     Instagram,
     Spotify,
+    Deezer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -25,6 +26,7 @@ pub enum Format {
     Webm,
     M4a,
     Opus,
+    Mp3,
     Flac,
     Wav,
 }
@@ -37,6 +39,7 @@ impl Format {
             Format::Webm => "webm",
             Format::M4a => "m4a",
             Format::Opus => "opus",
+            Format::Mp3 => "mp3",
             Format::Flac => "flac",
             Format::Wav => "wav",
         }
@@ -45,7 +48,7 @@ impl Format {
     pub fn is_audio(self) -> bool {
         matches!(
             self,
-            Format::M4a | Format::Opus | Format::Flac | Format::Wav
+            Format::M4a | Format::Opus | Format::Mp3 | Format::Flac | Format::Wav
         )
     }
 

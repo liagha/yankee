@@ -34,6 +34,8 @@ enum Command {
         format: Format,
         #[arg(long)]
         proxy: Option<String>,
+        #[arg(long)]
+        arl: Option<String>,
     },
     Get {
         #[arg(required = true)]
@@ -44,6 +46,8 @@ enum Command {
         format: Format,
         #[arg(long)]
         proxy: Option<String>,
+        #[arg(long)]
+        arl: Option<String>,
         #[arg(long, default_value_t = 4)]
         jobs: usize,
         #[arg(long)]
@@ -61,23 +65,30 @@ async fn main() -> Result<()> {
             audio,
             format,
             proxy,
+            arl,
         } => {
             if proxy.is_some() {
                 cfg.proxy = proxy;
             }
+            apply_arl(&mut cfg, arl);
             let req = with_opts(adapters::parse(&url)?, audio, format);
             let media = adapters::resolve(&req, &cfg).await?;
-            print!(
-                "{}\n  source: {}\n  artist: {}\n",
-                media.title,
-                media.source_tag(),
-                media.artist
-            );
-            for (k, v) in &media.tags {
-                println!("  {k}: {v}");
-            }
-            for a in &media.assets {
-                println!("  {}.{} ({:?})", a.ext, a.url, a.kind);
+            for (i, m) in media.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                print!(
+                    "{}\n  source: {}\n  artist: {}\n",
+                    m.title,
+                    m.source_tag(),
+                    m.artist
+                );
+                for (k, v) in &m.tags {
+                    println!("  {k}: {v}");
+                }
+                for a in &m.assets {
+                    println!("  {}.{} ({:?})", a.ext, a.url, a.kind);
+                }
             }
             Ok(())
         }
@@ -86,12 +97,14 @@ async fn main() -> Result<()> {
             audio,
             format,
             proxy,
+            arl,
             jobs,
             dir,
         } => {
             if proxy.is_some() {
                 cfg.proxy = proxy;
             }
+            apply_arl(&mut cfg, arl);
             let target = dir
                 .or_else(|| cfg.dir.as_ref().map(PathBuf::from))
                 .unwrap_or_else(|| PathBuf::from("downloads"));
@@ -116,13 +129,28 @@ async fn main() -> Result<()> {
                         bar.enable_steady_tick(std::time::Duration::from_millis(80));
                         let media = adapters::resolve(&req, &cfg).await;
                         match media {
-                            Ok(m) => {
-                                bar.set_message(format!("{} ({})", m.title, m.source_tag()));
-                                let files =
-                                    download::save(&m, target, cfg.proxy.as_deref(), mp, format)
-                                        .await;
+                            Ok(list) => {
+                                let mut files = Vec::new();
+                                for m in &list {
+                                    bar.set_message(format!("{} ({})", m.title, m.source_tag()));
+                                    match download::save(
+                                        m,
+                                        target,
+                                        cfg.proxy.as_deref(),
+                                        mp,
+                                        format,
+                                    )
+                                    .await
+                                    {
+                                        Ok(f) => files.extend(f),
+                                        Err(e) => {
+                                            bar.abandon_with_message(format!("failed {u}"));
+                                            return (u, Err(e));
+                                        }
+                                    }
+                                }
                                 bar.finish();
-                                (u, files)
+                                (u, Ok(files))
                             }
                             Err(e) => {
                                 bar.abandon_with_message(format!("failed {u}"));
@@ -163,8 +191,15 @@ fn with_opts(req: Request, audio: bool, format: Format) -> Request {
     match req {
         Request::Youtube { url, .. } => Request::Youtube { url, audio, format },
         Request::Spotify { url, kind, .. } => Request::Spotify { url, kind, format },
+        Request::Deezer { url, kind, .. } => Request::Deezer { url, kind, format },
         other => other,
     }
+}
+
+fn apply_arl(cfg: &mut config::Config, arl: Option<String>) {
+    cfg.arl = arl
+        .or_else(|| std::env::var("DEEZER_ARL").ok())
+        .or(cfg.arl.clone());
 }
 
 impl media::Media {
