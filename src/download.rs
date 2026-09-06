@@ -1,40 +1,81 @@
 //! shared downloader writing assets to disk
 
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use anyhow::{Context, Result};
+use futures::StreamExt;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use tokio::io::AsyncWriteExt;
 
 use crate::media::{Media, Source};
 
 pub async fn save(
     media: &Media,
-    dir: &std::path::Path,
+    dir: &Path,
     proxy: Option<&str>,
-) -> Result<Vec<std::path::PathBuf>> {
+    mp: &MultiProgress,
+) -> Result<Vec<PathBuf>> {
     let http = client(proxy)?;
     let mut out = Vec::new();
-    for (asset, candidate) in media.assets.iter().zip(shared_names(media, dir)) {
+    for (asset, name) in media.assets.iter().zip(shared_names(media, dir)) {
         let res = http
             .get(&asset.url)
             .header("Range", "bytes=0-")
             .send()
             .await?;
-        let bytes = res.error_for_status()?.bytes().await?;
-        std::fs::write(&candidate, bytes).with_context(|| format!("write {candidate:?}"))?;
-        out.push(candidate);
+        let total = res.content_length().unwrap_or(0);
+        let bar = mp.add(ProgressBar::new(total));
+        bar.set_style(if total > 0 {
+            bar_style()
+        } else {
+            count_style()
+        });
+        bar.set_message(
+            name.file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
+        let stream = res.bytes_stream();
+        let mut file = tokio::fs::File::create(&name)
+            .await
+            .with_context(|| format!("create {name:?}"))?;
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            file.write_all(&chunk).await?;
+            bar.inc(chunk.len() as u64);
+        }
+        file.flush().await?;
+        bar.finish_and_clear();
+        out.push(name);
     }
     Ok(out)
 }
 
 fn client(proxy: Option<&str>) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300));
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(300));
     if let Some(p) = proxy {
         builder = builder.proxy(reqwest::Proxy::all(p).context("proxy")?);
     }
     builder.build().context("client")
 }
 
-fn shared_names(media: &Media, dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+fn bar_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{bar:32.green/black} {percent:>3}% {bytes}/{total_bytes} [{binary_bytes_per_sec}] {msg}",
+    )
+    .expect("bar template")
+    .progress_chars("▓░")
+}
+
+fn count_style() -> ProgressStyle {
+    ProgressStyle::with_template("{spinner:.green} {bytes} {msg}").expect("count template")
+}
+
+fn shared_names(media: &Media, dir: &Path) -> Vec<PathBuf> {
     let stem = stem(&media.title);
-    let mut used: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut used = std::collections::HashSet::new();
     media
         .assets
         .iter()
