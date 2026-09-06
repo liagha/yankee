@@ -208,7 +208,11 @@ impl Api {
                 continue;
             }
             let score = if audio {
-                f.get("bitrate").and_then(|v| v.as_u64()).unwrap_or(0)
+                let mut s = f.get("bitrate").and_then(|v| v.as_u64()).unwrap_or(0);
+                if format.transcode() && essence == "audio/mp4" {
+                    s += 1 << 30;
+                }
+                s
             } else {
                 f.get("height").and_then(|v| v.as_u64()).unwrap_or(0)
             };
@@ -237,6 +241,7 @@ pub fn fits(essence: &str, audio: bool, format: Format) -> bool {
     if format.is_audio() {
         let want = match format {
             Format::M4a => "audio/mp4",
+            Format::Flac | Format::Wav => return essence.starts_with("audio"),
             _ => "audio/webm",
         };
         return essence == want;
@@ -402,5 +407,14 @@ mod tests {
         assert!(!fits("video/webm", false, Format::Opus));
         assert!(fits("audio/mp4", false, Format::M4a));
         assert!(!fits("video/mp4", false, Format::M4a));
+    }
+
+    #[test]
+    fn transcode_formats() {
+        assert!(fits("audio/webm", false, Format::Flac));
+        assert!(fits("audio/mp4", false, Format::Flac));
+        assert!(!fits("video/webm", false, Format::Flac));
+        assert!(fits("audio/webm", false, Format::Wav));
+        assert!(!fits("audio/webm", true, Format::Mp4));
     }
 }

@@ -4,6 +4,7 @@ mod adapters;
 mod config;
 mod download;
 mod media;
+mod transcode;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -118,7 +119,8 @@ async fn main() -> Result<()> {
                             Ok(m) => {
                                 bar.set_message(format!("{} ({})", m.title, m.source_tag()));
                                 let files =
-                                    download::save(&m, target, cfg.proxy.as_deref(), mp).await;
+                                    download::save(&m, target, cfg.proxy.as_deref(), mp, format)
+                                        .await;
                                 bar.finish();
                                 (u, files)
                             }

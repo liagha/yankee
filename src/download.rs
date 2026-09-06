@@ -8,17 +8,25 @@ use futures::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use tokio::io::AsyncWriteExt;
 
-use crate::media::{Media, Source};
+use crate::media::{Format, Kind, Media, Source};
+use crate::transcode;
 
 pub async fn save(
     media: &Media,
     dir: &Path,
     proxy: Option<&str>,
     mp: &MultiProgress,
+    format: Format,
 ) -> Result<Vec<PathBuf>> {
     let http = client(proxy)?;
     let mut out = Vec::new();
     for (asset, name) in media.assets.iter().zip(shared_names(media, dir)) {
+        let (final_name, tmp) = if format.transcode() && asset.kind == Kind::Audio {
+            let ext = format.label();
+            (name.with_extension(ext), name.with_extension("part"))
+        } else {
+            (name.clone(), name)
+        };
         let res = http
             .get(&asset.url)
             .header("Range", "bytes=0-")
@@ -32,14 +40,15 @@ pub async fn save(
             count_style()
         });
         bar.set_message(
-            name.file_name()
+            final_name
+                .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default(),
         );
         let stream = res.bytes_stream();
-        let mut file = tokio::fs::File::create(&name)
+        let mut file = tokio::fs::File::create(&tmp)
             .await
-            .with_context(|| format!("create {name:?}"))?;
+            .with_context(|| format!("create {tmp:?}"))?;
         futures::pin_mut!(stream);
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
@@ -48,7 +57,19 @@ pub async fn save(
         }
         file.flush().await?;
         bar.finish_and_clear();
-        out.push(name);
+        if tmp != final_name {
+            let src = tmp.clone();
+            let dst = final_name.clone();
+            tokio::task::spawn_blocking(move || match format {
+                Format::Flac => transcode::to_flac(&src, &dst),
+                Format::Wav => transcode::to_wav(&src, &dst),
+                _ => Ok(()),
+            })
+            .await
+            .context("transcode task")??;
+            tokio::fs::remove_file(tmp).await?;
+        }
+        out.push(final_name);
     }
     Ok(out)
 }

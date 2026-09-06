@@ -25,6 +25,8 @@ pub enum Format {
     Webm,
     M4a,
     Opus,
+    Flac,
+    Wav,
 }
 
 impl Format {
@@ -35,11 +37,20 @@ impl Format {
             Format::Webm => "webm",
             Format::M4a => "m4a",
             Format::Opus => "opus",
+            Format::Flac => "flac",
+            Format::Wav => "wav",
         }
     }
 
     pub fn is_audio(self) -> bool {
-        matches!(self, Format::M4a | Format::Opus)
+        matches!(
+            self,
+            Format::M4a | Format::Opus | Format::Flac | Format::Wav
+        )
+    }
+
+    pub fn transcode(self) -> bool {
+        matches!(self, Format::Flac | Format::Wav)
     }
 }
 
