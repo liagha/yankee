@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use reqwest::{Client, header::HeaderMap};
 use serde_json::Value;
 
-use crate::media::{Asset, Kind, Media, Source};
+use crate::media::{Asset, Format, Kind, Media, Source, fmt_secs};
 
 const KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 
@@ -72,11 +72,11 @@ impl Api {
         })
     }
 
-    pub async fn resolve(&self, video_id: &str, audio: bool) -> Result<Media> {
+    pub async fn resolve(&self, video_id: &str, audio: bool, format: Format) -> Result<Media> {
         let mut last = anyhow::anyhow!("no stream");
         for spec in CLIENTS {
             match self.player(video_id, spec).await {
-                Ok(player) => return self.pick(&player, audio),
+                Ok(player) => return self.pick(&player, audio, format),
                 Err(e) => last = e,
             }
         }
@@ -174,7 +174,7 @@ impl Api {
         Ok(collect(data))
     }
 
-    fn pick(&self, player: &Value, audio: bool) -> Result<Media> {
+    fn pick(&self, player: &Value, audio: bool, format: Format) -> Result<Media> {
         let title = player
             .pointer("/videoDetails/title")
             .and_then(|v| v.as_str())
@@ -191,6 +191,7 @@ impl Api {
             .and_then(|v| v.as_array())
             .context("no formats")?;
 
+        let audio = audio || format.is_audio();
         let mut best = Best::new();
         for f in formats {
             let Some(url) = f.get("url").and_then(|v| v.as_str()) else {
@@ -203,12 +204,7 @@ impl Api {
                 .split(';')
                 .next()
                 .unwrap_or("");
-            let is_video = essence.starts_with("video");
-            let is_audio = essence.starts_with("audio");
-            if audio && !is_audio {
-                continue;
-            }
-            if !audio && !is_video {
+            if !fits(essence, audio, format) {
                 continue;
             }
             let score = if audio {
@@ -224,14 +220,67 @@ impl Api {
             );
         }
 
-        let asset = best.take().context("no usable stream")?;
+        let asset = best
+            .take()
+            .context(format!("no {} stream", format.label()))?;
         Ok(Media {
             source: Source::Youtube,
             title,
             artist,
+            tags: tags_of(player),
             assets: vec![asset],
         })
     }
+}
+
+pub fn fits(essence: &str, audio: bool, format: Format) -> bool {
+    if format.is_audio() {
+        let want = match format {
+            Format::M4a => "audio/mp4",
+            _ => "audio/webm",
+        };
+        return essence == want;
+    }
+    let is_video = essence.starts_with("video");
+    let is_audio = essence.starts_with("audio");
+    match format {
+        Format::Mp4 => essence == if audio { "audio/mp4" } else { "video/mp4" },
+        Format::Webm => essence == if audio { "audio/webm" } else { "video/webm" },
+        Format::Best if audio => is_audio,
+        _ => is_video,
+    }
+}
+
+fn str_of(player: &Value, at: &str) -> Option<String> {
+    let v = player.pointer(at)?;
+    if let Some(s) = v.as_str() {
+        Some(s.to_string())
+    } else {
+        v.as_u64().map(|n| n.to_string())
+    }
+}
+
+fn tags_of(player: &Value) -> Vec<(String, String)> {
+    let mut tags = Vec::new();
+    if let Some(s) = str_of(player, "/videoDetails/lengthSeconds").and_then(|s| s.parse().ok()) {
+        tags.push(("duration".into(), fmt_secs(s)));
+    }
+    if let Some(s) = str_of(player, "/videoDetails/viewCount") {
+        tags.push(("views".into(), s));
+    }
+    if let Some(u) = player
+        .pointer("/videoDetails/thumbnail/thumbnails")
+        .and_then(|v| v.as_array())
+        .and_then(|a| {
+            a.iter()
+                .max_by_key(|t| t.get("width").and_then(|w| w.as_u64()).unwrap_or(0))
+        })
+        .and_then(|t| t.get("url"))
+        .and_then(|v| v.as_str())
+    {
+        tags.push(("cover".into(), u.to_string()));
+    }
+    tags
 }
 
 fn status(player: &Value) -> String {
@@ -311,5 +360,47 @@ impl Best {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_best() {
+        assert!(fits("audio/webm; codecs=opus", true, Format::Best));
+        assert!(fits("audio/mp4; codecs=mp4a", true, Format::Best));
+        assert!(!fits("video/webm", true, Format::Best));
+    }
+
+    #[test]
+    fn video_best() {
+        assert!(fits("video/mp4", false, Format::Best));
+        assert!(!fits("audio/mp4", false, Format::Best));
+    }
+
+    #[test]
+    fn audio_containers() {
+        assert!(fits("audio/mp4", true, Format::Mp4));
+        assert!(!fits("audio/webm", true, Format::Mp4));
+        assert!(fits("audio/webm", true, Format::Webm));
+        assert!(!fits("audio/mp4", true, Format::Webm));
+    }
+
+    #[test]
+    fn video_containers() {
+        assert!(fits("video/mp4", false, Format::Mp4));
+        assert!(!fits("video/webm", false, Format::Mp4));
+        assert!(fits("video/webm", false, Format::Webm));
+        assert!(!fits("video/mp4", false, Format::Webm));
+    }
+
+    #[test]
+    fn audio_only() {
+        assert!(fits("audio/webm", false, Format::Opus));
+        assert!(!fits("video/webm", false, Format::Opus));
+        assert!(fits("audio/mp4", false, Format::M4a));
+        assert!(!fits("video/mp4", false, Format::M4a));
     }
 }

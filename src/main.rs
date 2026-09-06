@@ -14,6 +14,7 @@ use futures::stream::{self, StreamExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use adapters::Request;
+use media::Format;
 
 #[derive(Parser)]
 #[command(name = "yankee", about = "structured downloads from ugly sources")]
@@ -28,6 +29,8 @@ enum Command {
         url: String,
         #[arg(long)]
         audio: bool,
+        #[arg(long, default_value = "best")]
+        format: Format,
         #[arg(long)]
         proxy: Option<String>,
     },
@@ -36,6 +39,8 @@ enum Command {
         url: Vec<String>,
         #[arg(long)]
         audio: bool,
+        #[arg(long, default_value = "best")]
+        format: Format,
         #[arg(long)]
         proxy: Option<String>,
         #[arg(long, default_value_t = 4)]
@@ -50,11 +55,16 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut cfg = config::Config::load();
     match cli.command {
-        Command::Info { url, audio, proxy } => {
+        Command::Info {
+            url,
+            audio,
+            format,
+            proxy,
+        } => {
             if proxy.is_some() {
                 cfg.proxy = proxy;
             }
-            let req = with_audio(adapters::parse(&url)?, audio);
+            let req = with_opts(adapters::parse(&url)?, audio, format);
             let media = adapters::resolve(&req, &cfg).await?;
             print!(
                 "{}\n  source: {}\n  artist: {}\n",
@@ -62,6 +72,9 @@ async fn main() -> Result<()> {
                 media.source_tag(),
                 media.artist
             );
+            for (k, v) in &media.tags {
+                println!("  {k}: {v}");
+            }
             for a in &media.assets {
                 println!("  {}.{} ({:?})", a.ext, a.url, a.kind);
             }
@@ -70,6 +83,7 @@ async fn main() -> Result<()> {
         Command::Get {
             url,
             audio,
+            format,
             proxy,
             jobs,
             dir,
@@ -93,7 +107,7 @@ async fn main() -> Result<()> {
                     let cfg = cfg.clone();
                     async move {
                         let req = match adapters::parse(u) {
-                            Ok(r) => with_audio(r, audio),
+                            Ok(r) => with_opts(r, audio, format),
                             Err(e) => return (u, Err(e)),
                         };
                         let bar = mp.add(ProgressBar::new_spinner().with_style(spinner.clone()));
@@ -143,9 +157,10 @@ async fn main() -> Result<()> {
     }
 }
 
-fn with_audio(req: Request, audio: bool) -> Request {
+fn with_opts(req: Request, audio: bool, format: Format) -> Request {
     match req {
-        Request::Youtube { url, .. } => Request::Youtube { url, audio },
+        Request::Youtube { url, .. } => Request::Youtube { url, audio, format },
+        Request::Spotify { url, kind, .. } => Request::Spotify { url, kind, format },
         other => other,
     }
 }

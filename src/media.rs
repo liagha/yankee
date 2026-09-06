@@ -1,5 +1,6 @@
 //! shared model every adapter returns
 
+use clap::ValueEnum;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -16,6 +17,32 @@ pub enum Kind {
     Image,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, ValueEnum)]
+pub enum Format {
+    #[default]
+    Best,
+    Mp4,
+    Webm,
+    M4a,
+    Opus,
+}
+
+impl Format {
+    pub fn label(self) -> &'static str {
+        match self {
+            Format::Best => "best",
+            Format::Mp4 => "mp4",
+            Format::Webm => "webm",
+            Format::M4a => "m4a",
+            Format::Opus => "opus",
+        }
+    }
+
+    pub fn is_audio(self) -> bool {
+        matches!(self, Format::M4a | Format::Opus)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Asset {
     pub url: String,
@@ -28,7 +55,12 @@ pub struct Media {
     pub source: Source,
     pub title: String,
     pub artist: String,
+    pub tags: Vec<(String, String)>,
     pub assets: Vec<Asset>,
+}
+
+pub fn fmt_secs(s: u64) -> String {
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 pub fn ext_of(essence: &str) -> String {

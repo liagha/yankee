@@ -8,12 +8,22 @@ use anyhow::{Context, Result};
 use url::Url;
 
 use super::config::Config;
-use super::media::Media;
+use super::media::{Format, Media};
 
 pub enum Request {
-    Youtube { url: String, audio: bool },
-    Instagram { url: String },
-    Spotify { url: Url, kind: String },
+    Youtube {
+        url: String,
+        audio: bool,
+        format: Format,
+    },
+    Instagram {
+        url: String,
+    },
+    Spotify {
+        url: Url,
+        kind: String,
+        format: Format,
+    },
 }
 
 pub fn parse(input: &str) -> Result<Request> {
@@ -22,11 +32,16 @@ pub fn parse(input: &str) -> Result<Request> {
         Some(h) if h.contains("youtube.com") || h.contains("youtu.be") => Ok(Request::Youtube {
             url: input.into(),
             audio: false,
+            format: Format::Best,
         }),
         Some(h) if h.contains("instagram.com") => Ok(Request::Instagram { url: input.into() }),
         Some(h) if h.contains("open.spotify.com") => {
             let kind = spotify::kind(&url)?;
-            Ok(Request::Spotify { url, kind })
+            Ok(Request::Spotify {
+                url,
+                kind,
+                format: Format::Best,
+            })
         }
         _ => anyhow::bail!("unsupported host"),
     }
@@ -54,20 +69,20 @@ fn youtube_id(input: &str) -> Result<String> {
 
 pub async fn resolve(req: &Request, config: &Config) -> Result<Media> {
     match req {
-        Request::Youtube { url, audio } => {
+        Request::Youtube { url, audio, format } => {
             let client = youtube::Api::new(config.proxy.as_deref())?;
             let id = youtube_id(url)?;
-            Ok(client.resolve(&id, *audio).await?)
+            Ok(client.resolve(&id, *audio, *format).await?)
         }
         Request::Instagram { url } => {
             let client = instagram::Client::new(config.proxy.as_deref())?;
             client.resolve(url).await
         }
-        Request::Spotify { url, kind } => {
+        Request::Spotify { url, kind, format } => {
             let client = spotify::Client::new(config.proxy.as_deref())?;
             match kind.as_str() {
-                "track" => client.track(url.clone()).await,
-                "album" => client.album(url.clone()).await,
+                "track" => client.track(url.clone(), *format).await,
+                "album" => client.album(url.clone(), *format).await,
                 other => anyhow::bail!("unsupported kind: {other}"),
             }
         }

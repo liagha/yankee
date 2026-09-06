@@ -103,6 +103,7 @@ impl Client {
             source: Source::Instagram,
             title,
             artist: String::new(),
+            tags: Vec::new(),
             assets,
         })
     }
@@ -183,6 +184,7 @@ fn parse(node: &Value) -> Result<Media> {
         source: Source::Instagram,
         title,
         artist,
+        tags: Vec::new(),
         assets,
     })
 }

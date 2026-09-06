@@ -5,7 +5,7 @@ use reqwest::Client as Http;
 use serde_json::Value;
 use url::Url;
 
-use crate::media::{Asset, Kind, Media, Source};
+use crate::media::{Asset, Format, Kind, Media, Source, fmt_secs};
 
 use super::youtube;
 
@@ -30,34 +30,16 @@ impl Client {
         })
     }
 
-    pub async fn track(&self, url: Url) -> Result<Media> {
+    pub async fn track(&self, url: Url, format: Format) -> Result<Media> {
         let id = path_segment(&url, 1).context("no track id")?;
         let entity = self.entity("track", &id).await?;
-        let title = entity
-            .opt("name")
-            .or(entity.opt("title"))
-            .context("no title")?;
-        let artist = entity
-            .pointer("/artists/0/name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        self.media(title, artist).await
+        self.entity_media(&entity, format).await
     }
 
-    pub async fn album(&self, url: Url) -> Result<Media> {
+    pub async fn album(&self, url: Url, format: Format) -> Result<Media> {
         let id = path_segment(&url, 1).context("no album id")?;
         let entity = self.entity("album", &id).await?;
-        let title = entity
-            .opt("name")
-            .or(entity.opt("title"))
-            .context("no title")?;
-        let artist = entity
-            .pointer("/artists/0/name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        self.media(title, artist).await
+        self.entity_media(&entity, format).await
     }
 }
 
@@ -82,17 +64,40 @@ impl Client {
             .context("no entity")
     }
 
-    async fn media(&self, title: String, artist: String) -> Result<Media> {
+    async fn entity_media(&self, entity: &Value, format: Format) -> Result<Media> {
+        let title = entity
+            .get("name")
+            .or_else(|| entity.get("title"))
+            .and_then(|v| v.as_str())
+            .context("no title")?;
+        let artist = entity
+            .pointer("/artists/0/name")
+            .or_else(|| entity.get("subtitle"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let tags = tags_of(entity);
+        self.media(title.to_string(), artist, tags, format).await
+    }
+
+    async fn media(
+        &self,
+        title: String,
+        artist: String,
+        tags: Vec<(String, String)>,
+        format: Format,
+    ) -> Result<Media> {
         let query = format!("{artist} {title}");
         let mut last = anyhow::anyhow!("no match");
         for video_id in self.yt.search(&query).await? {
-            match self.yt.resolve(&video_id, true).await {
+            match self.yt.resolve(&video_id, true, format).await {
                 Ok(matched) => {
                     let asset = matched.assets.into_iter().next().context("no asset")?;
                     return Ok(Media {
                         source: Source::Spotify,
                         title,
                         artist,
+                        tags,
                         assets: vec![Asset {
                             url: asset.url,
                             ext: asset.ext,
@@ -107,6 +112,42 @@ impl Client {
     }
 }
 
+fn tags_of(entity: &Value) -> Vec<(String, String)> {
+    let mut tags = Vec::new();
+    if let Some(d) = entity
+        .get("duration")
+        .and_then(|v| v.as_u64())
+        .filter(|d| *d > 0)
+    {
+        tags.push(("duration".into(), fmt_secs(d / 1000)));
+    }
+    if let Some(y) = entity
+        .pointer("/releaseDate/isoString")
+        .and_then(|v| v.as_str())
+        .map(|s| &s[..s.len().min(4)])
+        .filter(|s| s.chars().all(char::is_numeric))
+    {
+        tags.push(("year".into(), y.to_string()));
+    }
+    if let Some(b) = entity.get("isExplicit").and_then(|v| v.as_bool()) {
+        tags.push(("explicit".into(), b.to_string()));
+    }
+    if let Some(u) = entity.pointer("/audioPreview/url").and_then(|v| v.as_str()) {
+        tags.push(("preview".into(), u.to_string()));
+    }
+    if let Some(u) = entity.get("uri").and_then(|v| v.as_str()) {
+        tags.push(("uri".into(), u.to_string()));
+    }
+    if let Some(n) = entity
+        .pointer("/trackList")
+        .and_then(|v| v.as_array())
+        .map(Vec::len)
+    {
+        tags.push(("tracks".into(), n.to_string()));
+    }
+    tags
+}
+
 pub fn kind(url: &Url) -> Result<String> {
     path_segment(url, 0).context("no kind")
 }
@@ -118,14 +159,4 @@ fn path_segment(url: &Url, at: usize) -> Result<String> {
         .nth(at)
         .context("segment")?
         .to_string())
-}
-
-trait Opt {
-    fn opt(&self, key: &str) -> Option<String>;
-}
-
-impl Opt for Value {
-    fn opt(&self, key: &str) -> Option<String> {
-        self.get(key).and_then(|v| v.as_str()).map(str::to_string)
-    }
 }
