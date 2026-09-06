@@ -24,13 +24,19 @@ impl Client {
         if let Some(p) = proxy {
             builder = builder.proxy(reqwest::Proxy::all(p).context("proxy")?);
         }
-        Ok(Self { http: builder.build().context("client")?, yt: youtube::Api::new(proxy)? })
+        Ok(Self {
+            http: builder.build().context("client")?,
+            yt: youtube::Api::new(proxy)?,
+        })
     }
 
     pub async fn track(&self, url: Url) -> Result<Media> {
         let id = path_segment(&url, 1).context("no track id")?;
         let entity = self.entity("track", &id).await?;
-        let title = entity.opt("name").or(entity.opt("title")).context("no title")?;
+        let title = entity
+            .opt("name")
+            .or(entity.opt("title"))
+            .context("no title")?;
         let artist = entity
             .pointer("/artists/0/name")
             .and_then(|v| v.as_str())
@@ -42,7 +48,10 @@ impl Client {
     pub async fn album(&self, url: Url) -> Result<Media> {
         let id = path_segment(&url, 1).context("no album id")?;
         let entity = self.entity("album", &id).await?;
-        let title = entity.opt("name").or(entity.opt("title")).context("no title")?;
+        let title = entity
+            .opt("name")
+            .or(entity.opt("title"))
+            .context("no title")?;
         let artist = entity
             .pointer("/artists/0/name")
             .and_then(|v| v.as_str())
@@ -68,7 +77,9 @@ impl Client {
             .context("no embed data")?;
         let end = html[inner..].find("</script>").context("no embed end")?;
         let data: Value = serde_json::from_str(&html[inner..inner + end]).context("bad json")?;
-        data.pointer("/props/pageProps/state/data/entity").cloned().context("no entity")
+        data.pointer("/props/pageProps/state/data/entity")
+            .cloned()
+            .context("no entity")
     }
 
     async fn media(&self, title: String, artist: String) -> Result<Media> {
@@ -82,7 +93,11 @@ impl Client {
                         source: Source::Spotify,
                         title,
                         artist,
-                        assets: vec![Asset { url: asset.url, ext: asset.ext, kind: Kind::Audio }],
+                        assets: vec![Asset {
+                            url: asset.url,
+                            ext: asset.ext,
+                            kind: Kind::Audio,
+                        }],
                     });
                 }
                 Err(e) => last = e,

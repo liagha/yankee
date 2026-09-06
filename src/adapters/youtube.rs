@@ -97,7 +97,10 @@ impl Api {
 
     async fn api(&self, path: &str, body: serde_json::Value, spec: &Spec) -> Result<Value> {
         let mut hdrs = HeaderMap::new();
-        hdrs.insert("X-YouTube-Client-Name", spec.num.to_string().parse().unwrap());
+        hdrs.insert(
+            "X-YouTube-Client-Name",
+            spec.num.to_string().parse().unwrap(),
+        );
         hdrs.insert("X-YouTube-Client-Version", spec.version.parse().unwrap());
         let mut body = body;
         body["context"]["client"]["deviceMake"] = spec.make.into();
@@ -110,7 +113,9 @@ impl Api {
         }
         let req = self
             .http
-            .post(format!("https://www.youtube.com/youtubei/v1/{path}?key={KEY}"))
+            .post(format!(
+                "https://www.youtube.com/youtubei/v1/{path}?key={KEY}"
+            ))
             .headers(hdrs)
             .json(&body);
         let data: Value = req.send().await?.json().await?;
@@ -119,7 +124,10 @@ impl Api {
     }
 
     fn store_visitor(&self, data: &Value) {
-        if let Some(v) = data.pointer("/responseContext/visitorData").and_then(|x| x.as_str()) {
+        if let Some(v) = data
+            .pointer("/responseContext/visitorData")
+            .and_then(|x| x.as_str())
+        {
             let mut vd = self.visitor.write().unwrap();
             if vd.as_deref() != Some(v) {
                 *vd = Some(v.to_string());
@@ -127,22 +135,25 @@ impl Api {
         }
     }
 
+    fn forget_visitor(&self) {
+        *self.visitor.write().unwrap() = None;
+    }
+
     async fn player(&self, video_id: &str, spec: &Spec) -> Result<Value> {
-        let body = serde_json::json!({
-            "context": {"client": {"clientName": spec.name, "clientVersion": spec.version}},
-            "videoId": video_id,
-        });
-        let player = self.api("player", body, spec).await?;
-        let gated = status(&player) != "OK";
-        if gated {
-            let body = serde_json::json!({
+        let body = |video_id: &str| {
+            serde_json::json!({
                 "context": {"client": {"clientName": spec.name, "clientVersion": spec.version}},
                 "videoId": video_id,
-            });
-            let retry = self.api("player", body, spec).await?;
+            })
+        };
+        let player = self.api("player", body(video_id), spec).await?;
+        let gated = status(&player) != "OK";
+        if gated {
+            let retry = self.api("player", body(video_id), spec).await?;
             if status(&retry) == "OK" {
                 return Ok(retry);
             }
+            self.forget_visitor();
             let st = status(&player);
             let reason = player
                 .pointer("/playabilityStatus/reason")
@@ -182,7 +193,9 @@ impl Api {
 
         let mut best = Best::new();
         for f in formats {
-            let Some(url) = f.get("url").and_then(|v| v.as_str()) else { continue };
+            let Some(url) = f.get("url").and_then(|v| v.as_str()) else {
+                continue;
+            };
             let essence = f
                 .get("mimeType")
                 .and_then(|v| v.as_str())
@@ -212,7 +225,12 @@ impl Api {
         }
 
         let asset = best.take().context("no usable stream")?;
-        Ok(Media { source: Source::Youtube, title, artist, assets: vec![asset] })
+        Ok(Media {
+            source: Source::Youtube,
+            title,
+            artist,
+            assets: vec![asset],
+        })
     }
 }
 
@@ -263,7 +281,13 @@ struct Best {
 
 impl Best {
     fn new() -> Self {
-        Self { url: String::new(), ext: String::new(), kind: Kind::Video, score: 0, set: false }
+        Self {
+            url: String::new(),
+            ext: String::new(),
+            kind: Kind::Video,
+            score: 0,
+            set: false,
+        }
     }
 
     fn update(&mut self, url: &str, ext: String, kind: Kind, score: u64) {
@@ -279,7 +303,11 @@ impl Best {
     fn take(&mut self) -> Option<Asset> {
         if self.set {
             self.set = false;
-            Some(Asset { url: self.url.clone(), ext: self.ext.clone(), kind: self.kind })
+            Some(Asset {
+                url: self.url.clone(),
+                ext: self.ext.clone(),
+                kind: self.kind,
+            })
         } else {
             None
         }

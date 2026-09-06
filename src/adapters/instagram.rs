@@ -17,7 +17,9 @@ impl Client {
         if let Some(p) = proxy {
             builder = builder.proxy(reqwest::Proxy::all(p).context("proxy")?);
         }
-        Ok(Self { http: builder.build().context("client")? })
+        Ok(Self {
+            http: builder.build().context("client")?,
+        })
     }
 
     pub async fn resolve(&self, input: &str) -> Result<Media> {
@@ -35,10 +37,10 @@ fn shortcode_url(input: &str) -> Result<String> {
         .context("no path")?
         .map(|s| s.to_string())
         .collect();
-    let code = segs
-        .get(1)
-        .context("no shortcode")?;
-    Ok(format!("https://www.instagram.com/p/{code}/embed/captioned/"))
+    let code = segs.get(1).context("no shortcode")?;
+    Ok(format!(
+        "https://www.instagram.com/p/{code}/embed/captioned/"
+    ))
 }
 
 fn context_json(html: &str) -> Result<String> {
@@ -49,7 +51,9 @@ fn context_json(html: &str) -> Result<String> {
     let body = &html[start + head.len()..];
     let mut end = 0;
     loop {
-        let Some(rel) = body[end..].find('"') else { anyhow::bail!("unterminated") };
+        let Some(rel) = body[end..].find('"') else {
+            anyhow::bail!("unterminated")
+        };
         let abs = end + rel;
         if is_escaped(body, abs) {
             end = abs + 1;
@@ -91,7 +95,10 @@ fn parse(raw: &str) -> Result<Media> {
         .to_string();
 
     let mut assets = Vec::new();
-    if let Some(edges) = node.pointer("/edge_sidecar_to_children/edges").and_then(|e| e.as_array()) {
+    if let Some(edges) = node
+        .pointer("/edge_sidecar_to_children/edges")
+        .and_then(|e| e.as_array())
+    {
         let count = node
             .pointer("/edge_sidecar_to_children/count")
             .and_then(|v| v.as_u64())
@@ -107,14 +114,27 @@ fn parse(raw: &str) -> Result<Media> {
     if assets.is_empty() {
         anyhow::bail!("no media")
     }
-    Ok(Media { source: Source::Instagram, title, artist, assets })
+    Ok(Media {
+        source: Source::Instagram,
+        title,
+        artist,
+        assets,
+    })
 }
 
 fn asset_of(node: &Value) -> Option<Asset> {
     if let Some(u) = node.get("video_url").and_then(|v| v.as_str()) {
-        return Some(Asset { url: u.to_string(), ext: "mp4".into(), kind: Kind::Video });
+        return Some(Asset {
+            url: u.to_string(),
+            ext: "mp4".into(),
+            kind: Kind::Video,
+        });
     }
     node.get("display_url")
         .and_then(|v| v.as_str())
-        .map(|u| Asset { url: u.to_string(), ext: "jpg".into(), kind: Kind::Image })
+        .map(|u| Asset {
+            url: u.to_string(),
+            ext: "jpg".into(),
+            kind: Kind::Image,
+        })
 }

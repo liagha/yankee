@@ -19,9 +19,10 @@ pub enum Request {
 pub fn parse(input: &str) -> Result<Request> {
     let url = Url::parse(input).context("bad url")?;
     match url.host_str() {
-        Some(h) if h.contains("youtube.com") || h.contains("youtu.be") => {
-            Ok(Request::Youtube { url: input.into(), audio: false })
-        }
+        Some(h) if h.contains("youtube.com") || h.contains("youtu.be") => Ok(Request::Youtube {
+            url: input.into(),
+            audio: false,
+        }),
         Some(h) if h.contains("instagram.com") => Ok(Request::Instagram { url: input.into() }),
         Some(h) if h.contains("open.spotify.com") => {
             let kind = spotify::kind(&url)?;

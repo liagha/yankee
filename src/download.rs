@@ -4,11 +4,19 @@ use anyhow::{Context, Result};
 
 use crate::media::{Media, Source};
 
-pub async fn save(media: &Media, dir: &std::path::Path, proxy: Option<&str>) -> Result<Vec<std::path::PathBuf>> {
+pub async fn save(
+    media: &Media,
+    dir: &std::path::Path,
+    proxy: Option<&str>,
+) -> Result<Vec<std::path::PathBuf>> {
     let http = client(proxy)?;
     let mut out = Vec::new();
     for (asset, candidate) in media.assets.iter().zip(shared_names(media, dir)) {
-        let res = http.get(&asset.url).header("Range", "bytes=0-").send().await?;
+        let res = http
+            .get(&asset.url)
+            .header("Range", "bytes=0-")
+            .send()
+            .await?;
         let bytes = res.error_for_status()?.bytes().await?;
         std::fs::write(&candidate, bytes).with_context(|| format!("write {candidate:?}"))?;
         out.push(candidate);
@@ -63,9 +71,5 @@ fn stem(title: &str) -> String {
         }
     }
     let s = s.split_whitespace().collect::<Vec<_>>().join("-");
-    if s.is_empty() {
-        "download".into()
-    } else {
-        s
-    }
+    if s.is_empty() { "download".into() } else { s }
 }

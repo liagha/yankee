@@ -21,8 +21,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Info { url: String, #[arg(long)] audio: bool, #[arg(long)] proxy: Option<String> },
-    Get { url: String, #[arg(long)] audio: bool, #[arg(long)] proxy: Option<String>, #[arg(long)] dir: Option<PathBuf> },
+    Info {
+        url: String,
+        #[arg(long)]
+        audio: bool,
+        #[arg(long)]
+        proxy: Option<String>,
+    },
+    Get {
+        url: String,
+        #[arg(long)]
+        audio: bool,
+        #[arg(long)]
+        proxy: Option<String>,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -36,12 +50,22 @@ async fn main() -> Result<()> {
             }
             let req = with_audio(adapters::parse(&url)?, audio);
             let media = adapters::resolve(&req, &cfg).await?;
-            print!("{}\n  source: {}\n  artist: {}\n", media.title, media.source_tag(), media.artist);
+            print!(
+                "{}\n  source: {}\n  artist: {}\n",
+                media.title,
+                media.source_tag(),
+                media.artist
+            );
             for a in &media.assets {
                 println!("  {}.{} ({:?})", a.ext, a.url, a.kind);
             }
         }
-        Command::Get { url, audio, proxy, dir } => {
+        Command::Get {
+            url,
+            audio,
+            proxy,
+            dir,
+        } => {
             if proxy.is_some() {
                 cfg.proxy = proxy;
             }
