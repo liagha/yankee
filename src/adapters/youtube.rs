@@ -83,11 +83,11 @@ impl Api {
         Err(last)
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<String>> {
+    pub async fn search(&self, query: &str) -> Result<Vec<Candidate>> {
         let mut last = anyhow::anyhow!("no results");
         for spec in CLIENTS {
             match self.query(query, spec).await {
-                Ok(ids) if !ids.is_empty() => return Ok(ids),
+                Ok(cands) if !cands.is_empty() => return Ok(cands),
                 Ok(_) => last = anyhow::anyhow!("no results"),
                 Err(e) => last = e,
             }
@@ -168,13 +168,13 @@ impl Api {
         anyhow::bail!("{reason}")
     }
 
-    async fn query(&self, query: &str, spec: &Spec) -> Result<Vec<String>> {
+    async fn query(&self, query: &str, spec: &Spec) -> Result<Vec<Candidate>> {
         let body = serde_json::json!({
             "context": {"client": {"clientName": spec.name, "clientVersion": spec.version}},
             "query": query,
         });
         let data = self.api("search", body, spec).await?;
-        Ok(collect(data))
+        Ok(candidates(data))
     }
 
     fn pick(&self, player: &Value, audio: bool, format: Format) -> Result<Media> {
@@ -299,19 +299,45 @@ fn status(player: &Value) -> String {
         .to_string()
 }
 
-fn collect(v: Value) -> Vec<String> {
+#[derive(Clone, Debug)]
+pub struct Candidate {
+    pub id: String,
+    pub secs: Option<u64>,
+}
+
+fn candidates(v: Value) -> Vec<Candidate> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     collect_in(&v, &mut out, &mut seen);
     out
 }
 
-fn collect_in(v: &Value, out: &mut Vec<String>, seen: &mut std::collections::HashSet<String>) {
+fn collect_in(
+    v: &Value,
+    out: &mut Vec<Candidate>,
+    seen: &mut std::collections::HashSet<String>,
+) {
     match v {
         Value::Object(map) => {
-            if let Some(v) = map.get("videoId").and_then(|x| x.as_str()) {
-                if seen.insert(v.to_string()) {
-                    out.push(v.to_string());
+            if let Some(render) = map
+                .get("compactVideoRenderer")
+                .or_else(|| map.get("videoRenderer"))
+                && let Some(id) = render.get("videoId").and_then(|x| x.as_str())
+            {
+                if seen.insert(id.to_string()) {
+                    out.push(Candidate {
+                        id: id.to_string(),
+                        secs: length_secs(render),
+                    });
+                }
+                return;
+            }
+            if let Some(id) = map.get("videoId").and_then(|x| x.as_str()) {
+                if seen.insert(id.to_string()) {
+                    out.push(Candidate {
+                        id: id.to_string(),
+                        secs: None,
+                    });
                 }
                 return;
             }
@@ -325,6 +351,19 @@ fn collect_in(v: &Value, out: &mut Vec<String>, seen: &mut std::collections::Has
             }
         }
         _ => {}
+    }
+}
+
+fn length_secs(render: &Value) -> Option<u64> {
+    let s = render
+        .get("lengthText")
+        .and_then(|v| v.get("simpleText"))
+        .and_then(|v| v.as_str())?;
+    let parts: Vec<u64> = s.split(':').filter_map(|p| p.parse().ok()).collect();
+    match parts.as_slice() {
+        [m, sec] => Some(m * 60 + sec),
+        [h, m, sec] => Some(h * 3600 + m * 60 + sec),
+        _ => None,
     }
 }
 
@@ -374,6 +413,33 @@ impl Best {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_lengths() {
+        let r = |s: &str| serde_json::json!({"lengthText": {"simpleText": s}});
+        assert_eq!(length_secs(&r("4:07")), Some(247));
+        assert_eq!(length_secs(&r("1:02:33")), Some(3753));
+        assert_eq!(length_secs(&r("0:30")), Some(30));
+        assert_eq!(length_secs(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn collects_renderers() {
+        let data = serde_json::json!([
+            {"mixed": [
+                {"compactVideoRenderer": {"videoId": "AAA", "lengthText": {"simpleText": "4:07"}}},
+                {"videoRenderer": {"videoId": "BBB", "lengthText": {"simpleText": "2:00"}}},
+                {"watched": [{"videoId": "CCC"}]},
+            ]}
+        ]);
+        let got: std::collections::HashMap<String, Option<u64>> = candidates(data)
+            .into_iter()
+            .map(|c| (c.id, c.secs))
+            .collect();
+        assert_eq!(got["AAA"], Some(247));
+        assert_eq!(got["BBB"], Some(120));
+        assert_eq!(got["CCC"], None);
+    }
 
     #[test]
     fn audio_best() {

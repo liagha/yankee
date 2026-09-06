@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::media::{Asset, Format, Kind, Media, Source, fmt_secs};
 
-use super::youtube;
+use super::youtube::{self, Candidate};
 
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
 
@@ -77,7 +77,13 @@ impl Client {
             .unwrap_or("unknown")
             .to_string();
         let tags = tags_of(entity);
-        self.media(title.to_string(), artist, tags, format).await
+        let want = entity
+            .get("duration")
+            .and_then(|v| v.as_u64())
+            .filter(|d| *d > 0)
+            .map(|d| d / 1000);
+        self.media(title.to_string(), artist, tags, format, want)
+            .await
     }
 
     async fn media(
@@ -86,11 +92,12 @@ impl Client {
         artist: String,
         tags: Vec<(String, String)>,
         format: Format,
+        want: Option<u64>,
     ) -> Result<Media> {
         let query = format!("{artist} {title}");
         let mut last = anyhow::anyhow!("no match");
-        for video_id in self.yt.search(&query).await? {
-            match self.yt.resolve(&video_id, true, format).await {
+        for cand in rank(self.yt.search(&query).await?, want) {
+            match self.yt.resolve(&cand.id, true, format).await {
                 Ok(matched) => {
                     let asset = matched.assets.into_iter().next().context("no asset")?;
                     return Ok(Media {
@@ -110,6 +117,15 @@ impl Client {
         }
         Err(last)
     }
+}
+
+fn rank(cands: Vec<Candidate>, want: Option<u64>) -> Vec<Candidate> {
+    let Some(want) = want else {
+        return cands;
+    };
+    let close = |c: &Candidate| c.secs.is_some_and(|s| s.abs_diff(want) <= 2);
+    let (a, b): (Vec<_>, Vec<_>) = cands.into_iter().partition(|c| close(c));
+    a.into_iter().chain(b).collect()
 }
 
 fn tags_of(entity: &Value) -> Vec<(String, String)> {
@@ -159,4 +175,38 @@ fn path_segment(url: &Url, at: usize) -> Result<String> {
         .nth(at)
         .context("segment")?
         .to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c(id: &str, secs: Option<u64>) -> Candidate {
+        Candidate {
+            id: id.into(),
+            secs,
+        }
+    }
+
+    #[test]
+    fn ranks_duration_close_first() {
+        let cands = vec![
+            c("live", Some(421)),
+            c("cover", Some(250)),
+            c("master", Some(283)),
+            c("no_len", None),
+        ];
+        let got = rank(cands, Some(283));
+        let ids: Vec<&str> = got.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids[0], "master");
+        assert_eq!(ids[1], "live");
+    }
+
+    #[test]
+    fn keeps_order_without_duration() {
+        let cands = vec![c("a", None), c("b", Some(10)), c("c", None)];
+        let got = rank(cands, None);
+        let ids: Vec<&str> = got.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+    }
 }
