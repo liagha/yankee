@@ -146,23 +146,26 @@ impl Api {
                 "videoId": video_id,
             })
         };
-        let player = self.api("player", body(video_id), spec).await?;
-        let gated = status(&player) != "OK";
-        if gated {
-            let retry = self.api("player", body(video_id), spec).await?;
-            if status(&retry) == "OK" {
-                return Ok(retry);
+        let mut last = None;
+        for attempt in 0..3 {
+            if attempt == 2 {
+                self.forget_visitor();
             }
-            self.forget_visitor();
-            let st = status(&player);
-            let reason = player
-                .pointer("/playabilityStatus/reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&st)
-                .to_string();
-            anyhow::bail!("{reason}");
+            let player = self.api("player", body(video_id), spec).await?;
+            if status(&player) == "OK" {
+                return Ok(player);
+            }
+            last = Some(player);
+            tokio::time::sleep(std::time::Duration::from_millis(300 * (attempt + 1))).await;
         }
-        Ok(player)
+        let player = last.context("player")?;
+        let st = status(&player);
+        let reason = player
+            .pointer("/playabilityStatus/reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&st)
+            .to_string();
+        anyhow::bail!("{reason}")
     }
 
     async fn query(&self, query: &str, spec: &Spec) -> Result<Vec<String>> {
